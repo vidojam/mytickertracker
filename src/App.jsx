@@ -1,18 +1,98 @@
 import { useState, useEffect } from 'react';
 import { fetchFinnhub } from './finnhubApi';
-
-const LOCAL_KEY = 'mytickertracker-settings-v4';
-const HISTORY_KEY = 'mytickertracker-history-v4';
-
+// ...existing code...
 function App() {
+  function handleTestAlert() {
+    // Use the most recently added symbol if available
+    const symbolList = Object.keys(histories);
+    const testSymbol = symbolList.length > 0 ? symbolList[symbolList.length - 1] : symbol;
+    if (!testSymbol) return;
+    setHistories(prev => {
+      const today = new Date().toISOString().slice(0, 10);
+      const prevHist = prev[testSymbol] || [];
+      let basePrice = 100;
+      if (prevHist.length > 0) {
+        basePrice = prevHist[prevHist.length - 1].price;
+      }
+      const fakePrice = +(basePrice * 1.05).toFixed(2);
+      const filtered = prevHist.filter(h => h.date !== today);
+      return {
+        ...prev,
+        [testSymbol]: [...filtered, { date: today, price: fakePrice }]
+      };
+    });
+    setPrices(prev => ({ ...prev, [testSymbol]: +(prev[testSymbol] ? prev[testSymbol] * 1.05 : 105).toFixed(2) }));
+  }
   const [symbol, setSymbol] = useState('');
   const [input, setInput] = useState('');
   const [prices, setPrices] = useState({}); // { SYMBOL: price }
   const [histories, setHistories] = useState({}); // { SYMBOL: [{date, price}] }
   const [alert, setAlert] = useState(null);
   const [threshold, setThreshold] = useState(5);
+  const [phone, setPhone] = useState('');
 
-  // Load settings and history from localStorage
+  async function sendSmsAlert(message) {
+    if (!phone) return;
+    try {
+      await fetch('http://localhost:5001/send-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: phone, message })
+      });
+    } catch (err) {
+      console.error('SMS send failed:', err);
+    }
+  }
+  const LOCAL_KEY = 'mytickertracker-settings-v4';
+  const HISTORY_KEY = 'mytickertracker-history-v4';
+
+  // Manual price fetch for a symbol
+  async function handleRefreshPrice(sym) {
+    try {
+      const data = await fetchFinnhub('/quote', { symbol: sym });
+      const realPrice = data.c;
+      setPrices(prev => ({ ...prev, [sym]: realPrice }));
+      setHistories(prev => {
+        const today = new Date().toISOString().slice(0, 10);
+        const prevHist = prev[sym] || [];
+        const filtered = prevHist.filter(h => h.date !== today);
+        return {
+          ...prev,
+          [sym]: [...filtered, { date: today, price: realPrice }]
+        };
+      });
+    } catch (err) {
+      setPrices(prev => ({ ...prev, [sym]: null }));
+    }
+  }
+
+// Helper to get YYYY-MM-DD string for N days ago
+function getDateNDaysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Helper to get all missing days between two dates (inclusive, returns array of YYYY-MM-DD)
+function getAllMissingDates(existingDates, startDateStr) {
+  const today = new Date();
+  const startDate = new Date(startDateStr);
+  const result = [];
+  for (
+    let d = new Date(startDate);
+    d <= today;
+    d.setDate(d.getDate() + 1)
+  ) {
+    const dateStr = d.toISOString().slice(0, 10);
+    if (!existingDates.includes(dateStr)) {
+      result.push(dateStr);
+    }
+  }
+  return result;
+}
+
+
+  // Load settings and history from localStorage, and fill all missing days in history (indefinite save)
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem(LOCAL_KEY));
     if (saved) {
@@ -21,7 +101,11 @@ function App() {
       setThreshold(saved.threshold || 5);
     }
     const hists = JSON.parse(localStorage.getItem(HISTORY_KEY));
-    if (hists) setHistories(hists);
+    console.log('Loaded from localStorage on refresh:', hists);
+    const historiesObj = hists && typeof hists === 'object' ? hists : {};
+    if (Object.keys(historiesObj).length > 0) {
+      setHistories(historiesObj);
+    }
   }, []);
 
   // Save settings and history to localStorage
@@ -35,31 +119,7 @@ function App() {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(histories));
   }, [histories]);
 
-  // Fetch price when symbol changes or every 10s
-  useEffect(() => {
-    if (!symbol) return;
-    async function fetchPrice() {
-      try {
-        const data = await fetchFinnhub('/quote', { symbol });
-        const realPrice = data.c;
-        setPrices(prev => ({ ...prev, [symbol]: realPrice }));
-        setHistories(prev => {
-          const today = new Date().toISOString().slice(0, 10);
-          const prevHist = prev[symbol] || [];
-          const filtered = prevHist.filter(h => h.date !== today);
-          return {
-            ...prev,
-            [symbol]: [...filtered, { date: today, price: realPrice }].slice(-7)
-          };
-        });
-      } catch (err) {
-        setPrices(prev => ({ ...prev, [symbol]: null }));
-      }
-    }
-    fetchPrice();
-    const interval = setInterval(fetchPrice, 10000);
-    return () => clearInterval(interval);
-  }, [symbol]);
+
 
   // Auto-detect day range for alert
   useEffect(() => {
@@ -80,7 +140,14 @@ function App() {
         break;
       }
     }
-    setAlert(found);
+    if (found) {
+      setAlert(found);
+      sendSmsAlert(
+        `${symbol} ${found.days} day alert - Increase ${found.threshold}% or more. Price now $${found.price}`
+      );
+    } else {
+      setAlert(null);
+    }
   }, [histories, threshold, symbol]);
 
   function handleSubmit(e) {
@@ -89,6 +156,15 @@ function App() {
     if (!newSymbol) return;
     setSymbol(newSymbol);
     setInput('');
+    setHistories(prev => {
+      if (prev[newSymbol]) return prev;
+      const updated = { ...prev, [newSymbol]: [] };
+      // Immediately persist to localStorage for reliability
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+      console.log('Saved to localStorage after adding symbol:', updated);
+      // Also update the histories state to trigger the useEffect
+      return updated;
+    });
     // Don't clear histories, just add new symbol
   }
 
@@ -110,54 +186,96 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
       <h1 className="text-6xl font-bold mb-4" style={{ fontSize: '4em' }}>MyTickerTracker</h1>
-      <form onSubmit={handleSubmit} className="flex gap-2 mb-4" style={{ fontSize: '2em' }}>
+      <form onSubmit={handleSubmit} className="flex mb-4" style={{ fontSize: '2em' }}>
         <input
           className="border rounded px-2 py-1"
-          style={{ fontSize: '2em' }}
+          style={{ fontSize: '1.5em', marginRight: '2.5em' }}
           value={input}
           onChange={e => setInput(e.target.value)}
-          placeholder="Enter stock symbol (e.g. AAPL)"
+          placeholder="Enter STOCK SYMBOL"
         />
-        <button className="bg-blue-600 text-white px-4 py-1 rounded" style={{ fontSize: '2em' }} type="submit">
-          Track
+        <input
+          className="border rounded px-2 py-1 ml-4"
+          style={{ fontSize: '1.5em' }}
+          value={phone}
+          onChange={e => setPhone(e.target.value)}
+          placeholder="Enter phone number"
+        />
+        <button
+          className="bg-blue-600 text-white px-8 py-2 shadow-md border-2 border-blue-700 transition duration-150 ease-in-out hover:bg-blue-700 hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-300"
+          style={{ fontSize: '1.5em', fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase' }}
+          type="submit"
+        >
+          TRACK
         </button>
       </form>
+      <button
+        className="bg-green-600 text-white px-6 py-2 rounded shadow-md mt-2 mb-6"
+        style={{ fontSize: '1.2em', fontWeight: 'bold' }}
+        onClick={handleTestAlert}
+        disabled={Object.keys(histories).length === 0}
+      >
+        Test 5% Alert
+      </button>
+
       {Object.keys(histories).length > 0 && (
-        <div className="mb-8 w-full flex flex-col items-center">
-          {Object.entries(histories).map(([sym, hist]) => (
-            <div key={sym} className="mb-8 w-full flex flex-col items-center">
-              <div className="mb-4 text-3xl flex items-center gap-4">
-                <span className="font-semibold">{sym}</span>: {prices[sym] !== undefined && prices[sym] !== null ? <span>${prices[sym]}</span> : 'Loading...'}
-                <button onClick={() => handleDelete(sym)} className="ml-4 px-3 py-1 bg-red-600 text-white rounded text-lg" style={{ fontSize: '0.7em' }}>Delete</button>
+        <div className="mb-8 w-full flex flex-row items-start justify-center">
+          {(() => {
+            const entries = Object.entries(histories);
+            const chunkSize = 5;
+            const columns = [];
+            for (let i = 0; i < entries.length; i += chunkSize) {
+              columns.push(entries.slice(i, i + chunkSize));
+            }
+            return columns.map((col, colIdx) => (
+              <div key={colIdx} className="flex flex-col items-center mx-4">
+                {col.map(([sym, hist]) => (
+                  <div key={sym} className="mb-8 w-full flex flex-col items-center">
+                    <div className="mb-4 flex items-center gap-4" style={{ fontSize: '2.6em', fontWeight: 'bold' }}>
+                      <span style={{ fontWeight: 'bold' }}>{sym}</span>:
+                      {prices[sym] !== undefined && prices[sym] !== null ? <span style={{ fontWeight: 'bold' }}>${prices[sym]}</span> : 'No price'}
+                      <button
+                        className="ml-2 px-2 py-1 bg-blue-400 text-white rounded text-base"
+                        style={{ fontWeight: 'bold' }}
+                        onClick={() => handleRefreshPrice(sym)}
+                      >
+                        Refresh Price
+                      </button>
+                      <button onClick={() => handleDelete(sym)} className="ml-4 px-3 py-1 bg-red-600 text-white rounded text-lg" style={{ fontWeight: 'bold', fontSize: '0.91em' }}>Delete</button>
+                    </div>
+                    {hist.length > 0 ? (
+                      <table className="table-auto border-collapse w-auto text-xl" style={{ fontSize: '1em', minWidth: 400 }}>
+                        <thead>
+                          <tr>
+                            <th className="border px-4 py-2">Date</th>
+                            <th className="border px-4 py-2">Price</th>
+                            <th className="border px-4 py-2">Change</th>
+                            <th className="border px-4 py-2"># Days</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {hist.slice(-7).map((h, idx, arr) => {
+                            const prev = idx > 0 ? arr[idx - 1] : null;
+                            const change = prev && prev.price ? (((h.price - prev.price) / prev.price) * 100).toFixed(2) : '-';
+                            return (
+                              <tr key={h.date}>
+                                <td className="border px-4 py-2">{h.date}</td>
+                                <td className="border px-4 py-2">${h.price}</td>
+                                <td className="border px-4 py-2">{change !== '-' ? `${change}%` : '-'}</td>
+                                <td className="border px-4 py-2">{hist.length - 7 + idx + 1}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div className="text-gray-400 text-lg italic mb-4">No price history yet.</div>
+                    )}
+                  </div>
+                ))}
               </div>
-              {hist.length > 0 && (
-                <table className="table-auto border-collapse w-auto text-xl" style={{ fontSize: '1em', minWidth: 400 }}>
-                  <thead>
-                    <tr>
-                      <th className="border px-4 py-2">Date</th>
-                      <th className="border px-4 py-2">Price</th>
-                      <th className="border px-4 py-2">Change</th>
-                      <th className="border px-4 py-2"># Days</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {hist.map((h, idx) => {
-                      const prev = idx > 0 ? hist[idx - 1] : null;
-                      const change = prev && prev.price ? (((h.price - prev.price) / prev.price) * 100).toFixed(2) : '-';
-                      return (
-                        <tr key={h.date}>
-                          <td className="border px-4 py-2">{h.date}</td>
-                          <td className="border px-4 py-2">${h.price}</td>
-                          <td className="border px-4 py-2">{change !== '-' ? `${change}%` : '-'}</td>
-                          <td className="border px-4 py-2">{idx}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       )}
       <div className="flex gap-4 mb-4" style={{ fontSize: '2em' }}>
@@ -187,4 +305,5 @@ function App() {
   );
 }
 
-export default App
+
+export default App;
