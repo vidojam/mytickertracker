@@ -61,42 +61,18 @@ function App() {
           [sym]: [...filtered, { date: today, price: realPrice }]
         };
       });
-    } catch (err) {
+    } catch {
       setPrices(prev => ({ ...prev, [sym]: null }));
     }
   }
 
-// Helper to get YYYY-MM-DD string for N days ago
-function getDateNDaysAgo(n) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-}
-
-// Helper to get all missing days between two dates (inclusive, returns array of YYYY-MM-DD)
-function getAllMissingDates(existingDates, startDateStr) {
-  const today = new Date();
-  const startDate = new Date(startDateStr);
-  const result = [];
-  for (
-    let d = new Date(startDate);
-    d <= today;
-    d.setDate(d.getDate() + 1)
-  ) {
-    const dateStr = d.toISOString().slice(0, 10);
-    if (!existingDates.includes(dateStr)) {
-      result.push(dateStr);
-    }
-  }
-  return result;
-}
 
 
   // Load settings and history from localStorage, and fill all missing days in history (indefinite save)
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem(LOCAL_KEY));
     if (saved) {
-      setSymbol(saved.symbol || '');
+      // setSymbol(saved.symbol || ''); // Removed as requested
       setInput(saved.symbol || '');
       setThreshold(saved.threshold || 5);
     }
@@ -141,14 +117,14 @@ function getAllMissingDates(existingDates, startDateStr) {
       }
     }
     if (found) {
-      setAlert(found);
+      // setAlert(found); // Removed as requested
       sendSmsAlert(
         `${symbol} ${found.days} day alert - Increase ${found.threshold}% or more. Price now $${found.price}`
       );
     } else {
-      setAlert(null);
+      // setAlert(null); // Removed as requested
     }
-  }, [histories, threshold, symbol]);
+  }, [histories, threshold, symbol, sendSmsAlert]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -230,19 +206,25 @@ function getAllMissingDates(existingDates, startDateStr) {
             return columns.map((col, colIdx) => (
               <div key={colIdx} className="flex flex-col items-center mx-4">
                 {col.map(([sym, hist]) => (
-                  <div key={sym} className="mb-8 w-full flex flex-col items-center">
-                    <div className="mb-4 flex items-center gap-4" style={{ fontSize: '2.6em', fontWeight: 'bold' }}>
-                      <span style={{ fontWeight: 'bold' }}>{sym}</span>:
-                      {prices[sym] !== undefined && prices[sym] !== null ? <span style={{ fontWeight: 'bold' }}>${prices[sym]}</span> : 'No price'}
-                      <button
-                        className="ml-2 px-2 py-1 bg-blue-400 text-white rounded text-base"
-                        style={{ fontWeight: 'bold' }}
-                        onClick={() => handleRefreshPrice(sym)}
-                      >
-                        Refresh Price
-                      </button>
-                      <button onClick={() => handleDelete(sym)} className="ml-4 px-3 py-1 bg-red-600 text-white rounded text-lg" style={{ fontWeight: 'bold', fontSize: '0.91em' }}>Delete</button>
-                    </div>
+                    <div key={sym} className="mb-8 w-full flex flex-col items-center">
+                      <div className="mb-4 flex items-center gap-4" style={{ fontSize: '2.6em', fontWeight: 'bold' }}>
+                        <span style={{ fontWeight: 'bold' }}>{sym}</span>:
+                        {prices[sym] !== undefined && prices[sym] !== null ? <span style={{ fontWeight: 'bold' }}>${prices[sym]}</span> : 'No price'}
+                        <button
+                          className="ml-2 px-2 py-1 bg-blue-400 text-white rounded text-base"
+                          style={{ fontWeight: 'bold' }}
+                          onClick={() => handleRefreshPrice(sym)}
+                        >
+                          Refresh Price
+                        </button>
+                        <button
+                          onClick={() => handleDelete(sym)}
+                          className="ml-4 px-3 py-1 bg-red-600 text-white rounded text-base"
+                          style={{ fontWeight: 'bold' }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     {hist.length > 0 ? (
                       <table className="table-auto border-collapse w-auto text-xl" style={{ fontSize: '1em', minWidth: 400 }}>
                         <thead>
@@ -257,12 +239,17 @@ function getAllMissingDates(existingDates, startDateStr) {
                           {hist.slice(-7).map((h, idx, arr) => {
                             const prev = idx > 0 ? arr[idx - 1] : null;
                             const change = prev && prev.price ? (((h.price - prev.price) / prev.price) * 100).toFixed(2) : '-';
+                            // Calculate days difference from last refresh date
+                            const lastDate = new Date(arr[arr.length - 1].date);
+                            const currDate = new Date(h.date);
+                            const diffTime = lastDate - currDate;
+                            const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
                             return (
                               <tr key={h.date}>
                                 <td className="border px-4 py-2">{h.date}</td>
                                 <td className="border px-4 py-2">${h.price}</td>
                                 <td className="border px-4 py-2">{change !== '-' ? `${change}%` : '-'}</td>
-                                <td className="border px-4 py-2">{hist.length - 7 + idx + 1}</td>
+                                <td className="border px-4 py-2">{diffDays}</td>
                               </tr>
                             );
                           })}
