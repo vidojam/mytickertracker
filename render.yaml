@@ -1,10 +1,8 @@
-staticSites:
-  - name: mytickertracker
-    rootDir: .
+services:
+  - type: static
+    name: mytickertracker
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
       - key: VITE_FINNHUB_API_KEY
-        sync: false
       - key: VITE_SMS_API_URL
-        sync: false
