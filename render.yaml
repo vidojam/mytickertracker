@@ -1,9 +1,11 @@
 services:
   - type: web
     name: mytickertracker
-    staticSite: true
     buildCommand: npm ci && npm run build
+    startCommand: ""
     publishPath: dist
     envVars:
       - key: VITE_FINNHUB_API_KEY
+        value: ""
       - key: VITE_SMS_API_URL
+        value: ""
