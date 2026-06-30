@@ -25,6 +25,8 @@ MyTickerTracker is a React + Vite app for tracking stock prices and generating t
 
 Deploy this project as a Static Site on Render.
 
+A Render Blueprint is included at render.yaml.
+
 - Build command: npm ci && npm run build
 - Publish directory: dist
 
