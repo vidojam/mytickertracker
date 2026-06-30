@@ -1,7 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { fetchFinnhub } from './finnhubApi';
 // ...existing code...
 function App() {
+  const LOCAL_KEY = 'mytickertracker-settings-v4';
+  const HISTORY_KEY = 'mytickertracker-history-v4';
+  const SMS_API_URL = import.meta.env.VITE_SMS_API_URL;
+
   function handleTestAlert() {
     // Use the most recently added symbol if available
     const symbolList = Object.keys(histories);
@@ -24,17 +28,25 @@ function App() {
     setPrices(prev => ({ ...prev, [testSymbol]: +(prev[testSymbol] ? prev[testSymbol] * 1.05 : 105).toFixed(2) }));
   }
   const [symbol, setSymbol] = useState('');
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(() => {
+    const saved = JSON.parse(localStorage.getItem(LOCAL_KEY));
+    return saved?.symbol || '';
+  });
   const [prices, setPrices] = useState({}); // { SYMBOL: price }
-  const [histories, setHistories] = useState({}); // { SYMBOL: [{date, price}] }
-  const [alert, setAlert] = useState(null);
-  const [threshold, setThreshold] = useState(5);
+  const [histories, setHistories] = useState(() => {
+    const stored = JSON.parse(localStorage.getItem(HISTORY_KEY));
+    return stored && typeof stored === 'object' ? stored : {};
+  }); // { SYMBOL: [{date, price}] }
+  const [threshold, setThreshold] = useState(() => {
+    const saved = JSON.parse(localStorage.getItem(LOCAL_KEY));
+    return saved?.threshold || 5;
+  });
   const [phone, setPhone] = useState('');
 
-  async function sendSmsAlert(message) {
-    if (!phone) return;
+  const sendSmsAlert = useCallback(async (message) => {
+    if (!phone || !SMS_API_URL) return;
     try {
-      await fetch('http://localhost:5001/send-sms', {
+      await fetch(SMS_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: phone, message })
@@ -42,9 +54,7 @@ function App() {
     } catch (err) {
       console.error('SMS send failed:', err);
     }
-  }
-  const LOCAL_KEY = 'mytickertracker-settings-v4';
-  const HISTORY_KEY = 'mytickertracker-history-v4';
+  }, [phone, SMS_API_URL]);
 
   // Manual price fetch for a symbol
   async function handleRefreshPrice(sym) {
@@ -65,25 +75,6 @@ function App() {
       setPrices(prev => ({ ...prev, [sym]: null }));
     }
   }
-
-
-
-  // Load settings and history from localStorage, and fill all missing days in history (indefinite save)
-  useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem(LOCAL_KEY));
-    if (saved) {
-      // setSymbol(saved.symbol || ''); // Removed as requested
-      setInput(saved.symbol || '');
-      setThreshold(saved.threshold || 5);
-    }
-    const hists = JSON.parse(localStorage.getItem(HISTORY_KEY));
-    console.log('Loaded from localStorage on refresh:', hists);
-    const historiesObj = hists && typeof hists === 'object' ? hists : {};
-    if (Object.keys(historiesObj).length > 0) {
-      setHistories(historiesObj);
-    }
-  }, []);
-
   // Save settings and history to localStorage
   useEffect(() => {
     localStorage.setItem(
@@ -101,7 +92,6 @@ function App() {
   useEffect(() => {
     const hist = histories[symbol] || [];
     if (!symbol || hist.length < 2) {
-      setAlert(null);
       return;
     }
     let found = null;
@@ -121,8 +111,6 @@ function App() {
       sendSmsAlert(
         `${symbol} ${found.days} day alert - Increase ${found.threshold}% or more. Price now $${found.price}`
       );
-    } else {
-      // setAlert(null); // Removed as requested
     }
   }, [histories, threshold, symbol, sendSmsAlert]);
 
@@ -280,13 +268,6 @@ function App() {
           </select>
         </div>
       </div>
-      {alert && (
-        <div
-          className="fixed top-0 left-0 w-full text-center py-3 text-2xl font-bold z-50 bg-red-500 text-white"
-        >
-          {symbol} {alert.days} day alert - Increase {alert.threshold}% or more. Price now ${alert.price}
-        </div>
-      )}
       <p className="mt-8 text-gray-500" style={{ fontSize: '2em' }}>Stock data updates every 10 seconds. Alerts and settings are saved. (Demo: 1 day = 10s)</p>
     </div>
   );

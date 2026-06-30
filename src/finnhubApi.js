@@ -1,8 +1,7 @@
 // Finnhub API utility
 // DO NOT commit your API keys to public repositories!
 
-const FINNHUB_API_KEY = "d777lfhr01qp6afkhcj0d777lfhr01qp6afkhcjg";
-const FINNHUB_API_SECRET = "d777lfhr01qp6afkhckg";
+const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_API_KEY;
 const BASE_URL = "https://finnhub.io/api/v1";
 
 /**
@@ -12,6 +11,10 @@ const BASE_URL = "https://finnhub.io/api/v1";
  * @returns {Promise<any>} - API response JSON
  */
 export async function fetchFinnhub(endpoint, params = {}) {
+  if (!FINNHUB_API_KEY) {
+    throw new Error("Missing VITE_FINNHUB_API_KEY environment variable");
+  }
+
   const url = new URL(BASE_URL + endpoint);
   url.searchParams.append("token", FINNHUB_API_KEY);
   Object.entries(params).forEach(([key, value]) => {
