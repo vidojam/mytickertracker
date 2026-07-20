@@ -23,7 +23,16 @@ export async function fetchFinnhub(endpoint, params = {}) {
 
   const response = await fetch(url.toString());
   if (!response.ok) {
-    throw new Error(`Finnhub API error: ${response.status}`);
+    let detail = "";
+    try {
+      const data = await response.json();
+      if (data && data.error) {
+        detail = ` - ${data.error}`;
+      }
+    } catch {
+      // Ignore JSON parse failures and keep status-only message.
+    }
+    throw new Error(`Finnhub API error: ${response.status}${detail}`);
   }
   return response.json();
 }
