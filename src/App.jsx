@@ -4,7 +4,6 @@ import { fetchFinnhub } from './finnhubApi';
 function App() {
   const LOCAL_KEY = 'mytickertracker-settings-v4';
   const HISTORY_KEY = 'mytickertracker-history-v4';
-  const SMS_API_URL = import.meta.env.VITE_SMS_API_URL;
   const HAS_FINNHUB_KEY = Boolean(import.meta.env.VITE_FINNHUB_API_KEY);
   const savedSettings = JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null');
 
@@ -22,9 +21,6 @@ function App() {
     const stored = JSON.parse(localStorage.getItem(HISTORY_KEY));
     return stored && typeof stored === 'object' ? stored : {};
   }); // { SYMBOL: [{date, price}] }
-  const [threshold, setThreshold] = useState(() => {
-    return savedSettings?.threshold || 5;
-  });
   const [stockCounts, setStockCounts] = useState(() => (
     savedSettings?.stockCounts && typeof savedSettings.stockCounts === 'object'
       ? savedSettings.stockCounts
@@ -32,19 +28,6 @@ function App() {
   ));
   const requestQueueRef = useRef(Promise.resolve());
   const lastRequestAtRef = useRef(0);
-
-  const sendSmsAlert = useCallback(async (message) => {
-    if (!SMS_API_URL) return;
-    try {
-      await fetch(SMS_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message })
-      });
-    } catch (err) {
-      console.error('SMS send failed:', err);
-    }
-  }, [SMS_API_URL]);
 
   const enqueueFinnhubRequest = useCallback((task) => {
     const run = async () => {
@@ -119,40 +102,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem(
       LOCAL_KEY,
-      JSON.stringify({ symbol, threshold, numStocksInput, stockCounts })
+      JSON.stringify({ symbol, numStocksInput, stockCounts })
     );
-  }, [symbol, threshold, numStocksInput, stockCounts]);
+  }, [symbol, numStocksInput, stockCounts]);
   useEffect(() => {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(histories));
   }, [histories]);
 
 
-
-  // Auto-detect day range for alert
-  useEffect(() => {
-    const hist = histories[symbol] || [];
-    if (!symbol || hist.length < 2) {
-      return;
-    }
-    let found = null;
-    for (let days = 1; days <= 7; days++) {
-      if (hist.length < days + 1) break;
-      const now = hist[hist.length - 1];
-      const past = hist[hist.length - 1 - days];
-      if (!now || !past) continue;
-      const change = ((now.price - past.price) / past.price) * 100;
-      if (change >= threshold) {
-        found = { days, change: change.toFixed(2), threshold, price: now.price };
-        break;
-      }
-    }
-    if (found) {
-      // setAlert(found); // Removed as requested
-      sendSmsAlert(
-        `${symbol} ${found.days} day alert - Increase ${found.threshold}% or more. Price now $${found.price}`
-      );
-    }
-  }, [histories, threshold, symbol, sendSmsAlert]);
 
   // Auto-generate new price on new day for tracked symbols
   useEffect(() => {
@@ -253,12 +210,11 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-      <h1 className="text-6xl font-bold mb-0" style={{ fontSize: '4em' }}>MyTickerTracker</h1>
-      <form onSubmit={handleSubmit} className="flex flex-col items-center justify-center mb-0" style={{ fontSize: '2em' }}>
+      <h1 className="text-3xl md:text-5xl lg:text-6xl font-bold mb-0 text-center">MyTickerTracker</h1>
+      <form onSubmit={handleSubmit} className="flex flex-col items-center justify-center mb-0 text-base md:text-xl">
         <div className="mb-1">
           <input
-            className="border rounded px-2 py-1 w-40"
-            style={{ fontSize: '0.75em' }}
+            className="border rounded px-2 py-1 w-48 text-base"
             type="number"
             min="0"
             step="1"
@@ -269,16 +225,14 @@ function App() {
         </div>
         <div className="flex flex-row items-center gap-3">
           <input
-            className="border rounded px-2 py-1 w-40"
-            style={{ fontSize: '0.75em' }}
+            className="border rounded px-2 py-1 w-48 text-base"
             value={input}
             onChange={e => setInput(e.target.value)}
             placeholder="Enter STOCK SYMBOL"
           />
         </div>
         <button
-          className="bg-blue-600 text-white px-4 py-1 shadow-md border-2 border-blue-700 transition duration-150 ease-in-out hover:bg-blue-700 hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-300 mt-2"
-          style={{ fontSize: '0.75em', fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase' }}
+          className="bg-blue-600 text-white px-4 py-2 text-base shadow-md border-2 border-blue-700 transition duration-150 ease-in-out hover:bg-blue-700 hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-300 mt-2 font-bold tracking-widest uppercase"
           type="submit"
         >
           Submit
@@ -286,13 +240,13 @@ function App() {
       </form>
 
       {!HAS_FINNHUB_KEY && (
-        <div className="mb-4 text-red-600" style={{ fontSize: '1.1em', fontWeight: 'bold' }}>
+        <div className="mb-4 text-red-600 text-sm md:text-base font-bold text-center px-2">
           Set VITE_FINNHUB_API_KEY in .env and restart npm run dev to enable Refresh Price.
         </div>
       )}
 
       {Object.keys(histories).length > 0 && (
-        <div className="mb-8 w-full flex flex-row items-start justify-center">
+        <div className="mb-8 w-full flex flex-col items-center">
           {(() => {
             const entries = Object.entries(histories);
             const chunkSize = 5;
@@ -301,10 +255,10 @@ function App() {
               columns.push(entries.slice(i, i + chunkSize));
             }
             return columns.map((col, colIdx) => (
-              <div key={colIdx} className="flex flex-col items-center mx-4">
+              <div key={colIdx} className="flex flex-col items-center mx-4 md:w-full">
                 {col.map(([sym, hist]) => (
                     <div key={sym} className="mb-8 w-full flex flex-col items-center">
-                      <div className="mb-4 flex items-center gap-4" style={{ fontSize: '2.6em', fontWeight: 'bold' }}>
+                      <div className="mb-4 flex flex-wrap items-center gap-2 text-xl md:text-3xl font-bold">
                         <span style={{ fontWeight: 'bold' }}>{`${stockCounts[sym] ?? 0} ${sym}`}</span>
                         <span style={{ fontWeight: 'bold', marginRight: '0.25em' }}>:</span>
                         {prices[sym] !== undefined && prices[sym] !== null ? <span style={{ fontWeight: 'bold', marginLeft: '0.25em' }}>${prices[sym]}</span> : 'No price'}
@@ -332,7 +286,8 @@ function App() {
                       <div className="text-gray-600 text-sm mb-3">Last refresh: {lastRefreshAt[sym]}</div>
                     )}
                     {hist.length > 0 ? (
-                      <table className="table-auto border-collapse w-auto text-xl" style={{ fontSize: '1em', minWidth: 400 }}>
+                      <div className="overflow-x-auto md:overflow-x-visible md:flex md:justify-center w-full">
+                      <table className="table-auto border-collapse w-auto text-sm md:text-base">
                         <thead>
                           <tr>
                             <th className="border px-4 py-2">Date</th>
@@ -372,6 +327,7 @@ function App() {
                           </tr>
                         </tbody>
                       </table>
+                      </div>
                     ) : (
                       <div className="text-gray-400 text-lg italic mb-4">No price history yet.</div>
                     )}
@@ -380,44 +336,29 @@ function App() {
               </div>
             ));
           })()}
+          {Object.keys(stockCounts).length > 0 && (
+            <div className="mb-8 flex justify-center w-full">
+              <table className="table-auto border-collapse w-auto text-xl">
+                <tbody>
+                  <tr>
+                    <td className="border px-4 py-2 font-bold text-xl md:text-3xl">All Stocks Total</td>
+                    <td className="border px-4 py-2 font-bold text-green-700 text-xl md:text-3xl">
+                      ${Object.entries(stockCounts)
+                        .reduce((total, [sym, shares]) => {
+                          const currentPrice = prices[sym];
+                          if (typeof currentPrice !== 'number') return total;
+                          return total + (Number(shares) * currentPrice);
+                        }, 0)
+                        .toFixed(2)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
-      {Object.keys(stockCounts).length > 0 && (
-        <div className="mb-8 w-full flex justify-center">
-          <table className="table-auto border-collapse w-auto text-xl" style={{ fontSize: '1em', minWidth: 400 }}>
-            <tbody>
-              <tr>
-                <td className="border px-4 py-2 font-bold" style={{ fontSize: '2em' }}>All Stocks Total</td>
-                <td className="border px-4 py-2 font-bold text-green-700" style={{ fontSize: '2em' }}>
-                  ${Object.entries(stockCounts)
-                    .reduce((total, [sym, shares]) => {
-                      const currentPrice = prices[sym];
-                      if (typeof currentPrice !== 'number') return total;
-                      return total + (Number(shares) * currentPrice);
-                    }, 0)
-                    .toFixed(2)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-      <div className="flex gap-4 mb-4" style={{ fontSize: '2em' }}>
-        <div>
-          <label className="block" style={{ fontSize: '0.5em' }}>Threshold (%)</label>
-          <select
-            className="border rounded px-2 py-1 w-24"
-            style={{ fontSize: '1em' }}
-            value={threshold}
-            onChange={e => setThreshold(Number(e.target.value))}
-          >
-            {[5,10].map(t => (
-              <option key={t} value={t} style={{ fontSize: '0.5em' }}>{t}%</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <p className="mt-8 text-gray-500" style={{ fontSize: '2em' }}>Stock data updates when you press Refresh Price. Alerts and settings are saved.</p>
+      <p className="mt-8 text-gray-500 text-sm md:text-base text-center px-2">Stock data updates when you press Refresh Price. Alerts and settings are saved.</p>
     </div>
   );
 }
